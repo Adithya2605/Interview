@@ -1,0 +1,28 @@
+{
+  "name": "ai-interview-app",
+  "version": "1.0.0",
+  "description": "AI-powered interview preparation app with resume analysis and personalized questions",
+  "main": "server/index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "cd server && npm run dev",
+    "client": "cd client && npm start",
+    "build": "cd client && npm run build",
+    "install-all": "npm install && cd server && npm install && cd ../client && npm install"
+  },
+  "keywords": [
+    "ai",
+    "interview",
+    "react",
+    "nodejs",
+    "openai"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "autoprefixer": "^10.4.21",
+    "concurrently": "^8.2.2",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.12"
+  }
+}
