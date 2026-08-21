@@ -1,92 +1,70 @@
 import React, { useState } from 'react';
-import { Upload, FileText, AlertCircle, CheckCircle, BarChart3 } from 'lucide-react';
+import { Upload, FileText, AlertCircle, CheckCircle, Zap } from 'lucide-react';
 import axios from 'axios';
-import ResumeAnalysisDisplay from './ResumeAnalysisDisplay';
 
 const ResumeUpload = ({ onUploadSuccess }) => {
   const [file, setFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
   const [dragActive, setDragActive] = useState(false);
-  const [analysisResult, setAnalysisResult] = useState(null);
-  const [showAnalysis, setShowAnalysis] = useState(false);
+  const [stage, setStage] = useState(''); // 'extracting' | 'done'
 
   const handleDrag = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    if (e.type === "dragenter" || e.type === "dragover") {
-      setDragActive(true);
-    } else if (e.type === "dragleave") {
-      setDragActive(false);
-    }
+    setDragActive(e.type === 'dragenter' || e.type === 'dragover');
   };
 
   const handleDrop = (e) => {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFileSelection(e.dataTransfer.files[0]);
-    }
+    if (e.dataTransfer.files?.[0]) handleFileSelection(e.dataTransfer.files[0]);
   };
 
   const handleFileSelection = (selectedFile) => {
     setError('');
-    
-    // Validate file type
-    const allowedTypes = ['application/pdf', 'text/plain'];
-    if (!allowedTypes.includes(selectedFile.type)) {
+    const allowed = ['application/pdf', 'text/plain'];
+    if (!allowed.includes(selectedFile.type)) {
       setError('Please upload a PDF or TXT file only.');
       return;
     }
-
-    // Validate file size (5MB limit)
     if (selectedFile.size > 5 * 1024 * 1024) {
       setError('File size must be less than 5MB.');
       return;
     }
-
     setFile(selectedFile);
+    setStage('');
   };
 
   const handleFileInput = (e) => {
-    if (e.target.files && e.target.files[0]) {
-      handleFileSelection(e.target.files[0]);
-    }
+    if (e.target.files?.[0]) handleFileSelection(e.target.files[0]);
   };
 
   const uploadResume = async () => {
     if (!file) return;
-
     setUploading(true);
     setError('');
+    setStage('extracting');
 
     try {
       const formData = new FormData();
       formData.append('resume', file);
 
       const response = await axios.post('http://localhost:5000/api/upload-resume', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
+        headers: { 'Content-Type': 'multipart/form-data' }
       });
 
       if (response.data.success) {
-        // Store analysis result
-        if (response.data.analysis) {
-          setAnalysisResult(response.data.analysis);
-          setShowAnalysis(true);
-        }
-        
+        setStage('done');
         onUploadSuccess({
           text: response.data.text,
-          filename: response.data.filename,
-          analysis: response.data.analysis
+          filename: response.data.filename
         });
       }
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to upload resume. Please try again.');
+      setStage('');
     } finally {
       setUploading(false);
     }
@@ -95,28 +73,28 @@ const ResumeUpload = ({ onUploadSuccess }) => {
   const removeFile = () => {
     setFile(null);
     setError('');
-    setAnalysisResult(null);
-    setShowAnalysis(false);
+    setStage('');
   };
+
+  const stageLabel = {
+    extracting: '⚡ Extracting text...',
+    done: '✓ Done!'
+  }[stage] || 'Process Resume';
 
   return (
     <div className="max-w-2xl mx-auto">
       <div className="text-center mb-8">
-        <h2 className="text-3xl font-bold text-gray-900 mb-4">
-          Upload Your Resume
-        </h2>
+        <h2 className="text-3xl font-bold text-gray-900 mb-4">Upload Your Resume</h2>
         <p className="text-gray-600">
-          Upload your resume to get personalized interview questions tailored to your experience
+          Upload your resume — we'll extract the text instantly and then generate personalized questions.
         </p>
       </div>
 
       <div className="card">
         {!file ? (
           <div
-            className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
-              dragActive
-                ? 'border-primary-500 bg-primary-50'
-                : 'border-gray-300 hover:border-gray-400'
+            className={`border-2 border-dashed rounded-lg p-10 text-center transition-colors ${
+              dragActive ? 'border-primary-500 bg-primary-50' : 'border-gray-300 hover:border-gray-400'
             }`}
             onDragEnter={handleDrag}
             onDragLeave={handleDrag}
@@ -127,9 +105,7 @@ const ResumeUpload = ({ onUploadSuccess }) => {
             <h3 className="text-lg font-medium text-gray-900 mb-2">
               Drop your resume here, or click to browse
             </h3>
-            <p className="text-sm text-gray-500 mb-4">
-              Supports PDF and TXT files up to 5MB
-            </p>
+            <p className="text-sm text-gray-500 mb-4">PDF or TXT · Max 5 MB</p>
             <input
               type="file"
               accept=".pdf,.txt"
@@ -137,10 +113,7 @@ const ResumeUpload = ({ onUploadSuccess }) => {
               className="hidden"
               id="resume-upload"
             />
-            <label
-              htmlFor="resume-upload"
-              className="btn-primary cursor-pointer inline-block"
-            >
+            <label htmlFor="resume-upload" className="btn-primary cursor-pointer inline-block">
               Choose File
             </label>
           </div>
@@ -151,17 +124,18 @@ const ResumeUpload = ({ onUploadSuccess }) => {
                 <FileText className="w-8 h-8 text-primary-600" />
                 <div>
                   <p className="font-medium text-gray-900">{file.name}</p>
-                  <p className="text-sm text-gray-500">
-                    {(file.size / 1024 / 1024).toFixed(2)} MB
-                  </p>
+                  <p className="text-sm text-gray-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
                 </div>
               </div>
-              <button
-                onClick={removeFile}
-                className="text-red-600 hover:text-red-700 font-medium"
-              >
+              <button onClick={removeFile} className="text-red-600 hover:text-red-700 font-medium" disabled={uploading}>
                 Remove
               </button>
+            </div>
+
+            {/* Speed notice */}
+            <div className="flex items-start space-x-2 p-3 bg-blue-50 rounded-lg text-sm text-blue-700">
+              <Zap className="w-4 h-4 mt-0.5 flex-shrink-0" />
+              <span>Text extraction is instant. AI question generation happens on the next screen after you pick your role.</span>
             </div>
 
             <div className="flex space-x-3">
@@ -172,8 +146,8 @@ const ResumeUpload = ({ onUploadSuccess }) => {
               >
                 {uploading ? (
                   <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                    <span>Processing...</span>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                    <span>{stageLabel}</span>
                   </>
                 ) : (
                   <>
@@ -182,11 +156,7 @@ const ResumeUpload = ({ onUploadSuccess }) => {
                   </>
                 )}
               </button>
-              <button
-                onClick={removeFile}
-                className="btn-secondary"
-                disabled={uploading}
-              >
+              <button onClick={removeFile} className="btn-secondary" disabled={uploading}>
                 Cancel
               </button>
             </div>
@@ -195,44 +165,15 @@ const ResumeUpload = ({ onUploadSuccess }) => {
 
         {error && (
           <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center space-x-2">
-            <AlertCircle className="w-5 h-5 text-red-600" />
+            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
             <p className="text-red-700 text-sm">{error}</p>
           </div>
         )}
       </div>
 
       <div className="mt-6 text-center text-sm text-gray-500">
-        <p>Your resume data is processed securely and not stored permanently.</p>
+        <p>Your resume is processed securely via PyMuPDF and analyzed by Gemini AI.</p>
       </div>
-
-      {/* Advanced Analysis Results */}
-      {showAnalysis && analysisResult && (
-        <div className="mt-8">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-xl font-bold text-gray-900 flex items-center">
-              <BarChart3 className="w-6 h-6 text-primary-600 mr-2" />
-              Advanced Resume Analysis
-            </h3>
-            <button
-              onClick={() => setShowAnalysis(false)}
-              className="text-gray-500 hover:text-gray-700 text-sm"
-            >
-              Hide Analysis
-            </button>
-          </div>
-          
-          <ResumeAnalysisDisplay 
-            analysis={analysisResult} 
-            jobRole="General Analysis" 
-          />
-          
-          <div className="mt-6 text-center">
-            <p className="text-sm text-gray-600 mb-4">
-              Analysis complete! You can now proceed to select your target job role for personalized questions.
-            </p>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

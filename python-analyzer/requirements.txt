@@ -1,11 +1,12 @@
+PyMuPDF>=1.23.0
+PyPDF2>=2.0.0
 spacy>=3.4.0
 pandas>=1.3.0
 scikit-learn>=1.0.0
-PyPDF2>=2.0.0
 numpy>=1.21.0
 nltk>=3.6.0
-matplotlib>=3.5.0
-seaborn>=0.11.0
 requests>=2.25.0
 textblob>=0.17.0
-# For spaCy English model, run: python -m spacy download en_core_web_sm
+flask>=2.3.0
+# For spaCy English model (used by answer_analyzer.py only):
+# python -m spacy download en_core_web_sm

@@ -4,9 +4,10 @@
   "description": "AI-powered interview preparation app with resume analysis and personalized questions",
   "main": "server/index.js",
   "scripts": {
-    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "dev": "concurrently \"npm run server\" \"npm run client\" \"npm run analyzer\"",
     "server": "cd server && npm run dev",
     "client": "cd client && npm start",
+    "analyzer": "python python-analyzer/analyzer_server.py",
     "build": "cd client && npm run build",
     "install-all": "npm install && cd server && npm install && cd ../client && npm install"
   },

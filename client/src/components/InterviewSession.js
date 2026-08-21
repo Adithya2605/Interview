@@ -1,219 +1,257 @@
-import React, { useState, useEffect } from 'react';
-import { MessageCircle, Send, Clock, CheckCircle, AlertCircle, BarChart3 } from 'lucide-react';
+import React, { useState } from 'react';
+import { MessageCircle, Send, CheckCircle, AlertCircle, BarChart3, Brain } from 'lucide-react';
 import axios from 'axios';
 import AdvancedAnswerFeedback from './AdvancedAnswerFeedback';
 
-const InterviewSession = ({ resumeData, jobRole, onComplete }) => {
+const DIFFICULTY_CONFIG = {
+  easy:   { label: 'Easy',   color: 'bg-green-100 text-green-700 border-green-300',  ring: 'ring-green-400',  badge: 'bg-green-500', count: 10 },
+  medium: { label: 'Medium', color: 'bg-yellow-100 text-yellow-700 border-yellow-300', ring: 'ring-yellow-400', badge: 'bg-yellow-500', count: 10 },
+  hard:   { label: 'Hard',   color: 'bg-red-100 text-red-700 border-red-300',        ring: 'ring-red-400',    badge: 'bg-red-500',    count: 10 },
+};
+
+const InterviewSession = ({ resumeData, jobRole, sessionData, onComplete }) => {
+  // sessionData = { sessionId, analysis, questions: { easy:[], medium:[], hard:[] } }
+
+  const [difficulty, setDifficulty] = useState(null);         // null = picker screen
   const [questions, setQuestions] = useState([]);
-  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState({});
   const [feedback, setFeedback] = useState({});
   const [currentAnswer, setCurrentAnswer] = useState('');
-  const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [evaluating, setEvaluating] = useState(false);
   const [sessionComplete, setSessionComplete] = useState(false);
   const [error, setError] = useState('');
 
-  // Generate questions on component mount
-  useEffect(() => {
-    generateQuestions();
-  }, []);
-
-  const generateQuestions = async () => {
-    try {
-      setLoading(true);
-      setError('');
-
-      const response = await axios.post('http://localhost:5000/api/generate-questions', {
-        resumeText: resumeData.text,
-        jobRole: jobRole
-      });
-
-      if (response.data.success) {
-        setQuestions(response.data.questions);
-      }
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to generate questions. Please try again.');
-    } finally {
-      setLoading(false);
+  // ── Difficulty picker ───────────────────────────────────────────────────
+  const startWithDifficulty = (diff) => {
+    const qs = sessionData?.questions?.[diff] || [];
+    if (qs.length === 0) {
+      setError(`No ${diff} questions found. Please try a different difficulty.`);
+      return;
     }
+    setDifficulty(diff);
+    setQuestions(qs);
+    setCurrentIndex(0);
+    setAnswers({});
+    setFeedback({});
+    setCurrentAnswer('');
+    setSessionComplete(false);
+    setError('');
   };
 
+  // ── Answer submission ───────────────────────────────────────────────────
   const submitAnswer = async () => {
     if (!currentAnswer.trim()) return;
 
     setSubmitting(true);
-    setEvaluating(true);
+    const currentQuestion = questions[currentIndex];
+    const updatedAnswers = { ...answers, [currentQuestion.id]: currentAnswer };
+    setAnswers(updatedAnswers);
 
     try {
-      const currentQuestion = questions[currentQuestionIndex];
-      
-      // Save the answer
-      const updatedAnswers = {
-        ...answers,
-        [currentQuestion.id]: currentAnswer
-      };
-      setAnswers(updatedAnswers);
-
-      // Get feedback from AI
       const response = await axios.post('http://localhost:5000/api/evaluate-answer', {
         question: currentQuestion.question,
         answer: currentAnswer,
-        jobRole: jobRole
+        jobRole
       });
 
+      const updatedFeedback = { ...feedback };
       if (response.data.success) {
-        const updatedFeedback = {
-          ...feedback,
-          [currentQuestion.id]: response.data.feedback
-        };
+        updatedFeedback[currentQuestion.id] = response.data.feedback;
         setFeedback(updatedFeedback);
       }
 
-      // Move to next question or complete session
-      if (currentQuestionIndex < questions.length - 1) {
-        setCurrentQuestionIndex(currentQuestionIndex + 1);
+      if (currentIndex < questions.length - 1) {
+        setCurrentIndex(currentIndex + 1);
         setCurrentAnswer('');
       } else {
-        // Session complete
-        const overallScore = calculateOverallScore(feedback, response.data.feedback);
+        const scores = Object.values(updatedFeedback).map(f => f.overallScore || 0);
+        const overallScore = scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
         setSessionComplete(true);
-        
-        onComplete({
-          questions: questions,
-          answers: updatedAnswers,
-          feedback: { ...feedback, [currentQuestion.id]: response.data.feedback },
-          overallScore: overallScore
-        });
+        onComplete({ questions, answers: updatedAnswers, feedback: updatedFeedback, overallScore });
       }
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to submit answer. Please try again.');
+      setError('Failed to submit answer. Please try again.');
     } finally {
       setSubmitting(false);
-      setEvaluating(false);
     }
   };
 
-  const calculateOverallScore = (existingFeedback, newFeedback) => {
-    const allFeedback = { ...existingFeedback };
-    if (newFeedback) {
-      allFeedback[questions[currentQuestionIndex].id] = newFeedback;
-    }
-    
-    const scores = Object.values(allFeedback).map(f => f.overallScore || 0);
+  const calcScore = () => {
+    const scores = Object.values(feedback).map(f => f.overallScore || 0);
     return scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
   };
 
-  const goToPreviousQuestion = () => {
-    if (currentQuestionIndex > 0) {
-      setCurrentQuestionIndex(currentQuestionIndex - 1);
-      const prevQuestionId = questions[currentQuestionIndex - 1].id;
-      setCurrentAnswer(answers[prevQuestionId] || '');
-    }
-  };
+  // ── Difficulty Picker Screen ────────────────────────────────────────────
+  if (!difficulty) {
+    const analysis = sessionData?.analysis || {};
 
-  if (loading) {
     return (
-      <div className="max-w-4xl mx-auto text-center">
-        <div className="card">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto mb-4"></div>
-          <h3 className="text-lg font-medium text-gray-900 mb-2">
-            Generating Your Interview Questions
-          </h3>
-          <p className="text-gray-600">
-            Our AI is analyzing your resume and creating personalized questions for the {jobRole} role...
-          </p>
+      <div className="max-w-4xl mx-auto">
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center space-x-2 bg-green-50 border border-green-200 rounded-full px-4 py-2 mb-4">
+            <CheckCircle className="w-4 h-4 text-green-600" />
+            <span className="text-green-700 text-sm font-medium">30 questions ready for {jobRole}</span>
+          </div>
+          <h2 className="text-3xl font-bold text-gray-900 mb-2">Choose Your Difficulty</h2>
+          <p className="text-gray-600">Pick a difficulty level to start your interview session.</p>
         </div>
+
+        {error && (
+          <div className="mb-6 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm text-center">
+            {error}
+          </div>
+        )}
+
+        {/* Difficulty cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          {Object.entries(DIFFICULTY_CONFIG).map(([diff, cfg]) => {
+            const qCount = sessionData?.questions?.[diff]?.length || 0;
+            return (
+              <button
+                key={diff}
+                onClick={() => startWithDifficulty(diff)}
+                className={`card text-left hover:shadow-lg transition-all duration-200 ring-2 ring-transparent hover:${cfg.ring} border-2 hover:border-opacity-60 focus:outline-none`}
+              >
+                <div className={`inline-block px-3 py-1 rounded-full text-sm font-semibold mb-3 border ${cfg.color}`}>
+                  {cfg.label}
+                </div>
+                <h3 className="text-xl font-bold text-gray-900 mb-1">{qCount} Questions</h3>
+                <p className="text-sm text-gray-500">
+                  {diff === 'easy'   && 'Conceptual & foundational questions'}
+                  {diff === 'medium' && 'Applied & problem-solving questions'}
+                  {diff === 'hard'   && 'Advanced & architectural deep dives'}
+                </p>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Analysis summary */}
+        {analysis.skills?.length > 0 && (
+          <div className="card bg-gray-50 border-gray-200">
+            <h3 className="font-semibold text-gray-900 mb-3 flex items-center space-x-2">
+              <Brain className="w-5 h-5 text-primary-600" />
+              <span>Your Resume Summary</span>
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+              {analysis.programming_languages?.length > 0 && (
+                <div>
+                  <p className="text-gray-500 mb-1 font-medium">Programming Languages</p>
+                  <div className="flex flex-wrap gap-1">
+                    {analysis.programming_languages.map((s, i) => (
+                      <span key={i} className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs">{s}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {analysis.frameworks?.length > 0 && (
+                <div>
+                  <p className="text-gray-500 mb-1 font-medium">Frameworks</p>
+                  <div className="flex flex-wrap gap-1">
+                    {analysis.frameworks.map((s, i) => (
+                      <span key={i} className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full text-xs">{s}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {analysis.databases?.length > 0 && (
+                <div>
+                  <p className="text-gray-500 mb-1 font-medium">Databases</p>
+                  <div className="flex flex-wrap gap-1">
+                    {analysis.databases.map((s, i) => (
+                      <span key={i} className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs">{s}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {analysis.weak_areas?.length > 0 && (
+                <div>
+                  <p className="text-gray-500 mb-1 font-medium">⚠ Weak Areas</p>
+                  <div className="flex flex-wrap gap-1">
+                    {analysis.weak_areas.map((s, i) => (
+                      <span key={i} className="px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-xs">{s}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
 
-  if (error) {
-    return (
-      <div className="max-w-2xl mx-auto">
-        <div className="card text-center">
-          <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-red-900 mb-2">
-            Something went wrong
-          </h3>
-          <p className="text-red-700 mb-4">{error}</p>
-          <button
-            onClick={generateQuestions}
-            className="btn-primary"
-          >
-            Try Again
-          </button>
-        </div>
-      </div>
-    );
-  }
-
+  // ── Session Complete Screen ─────────────────────────────────────────────
   if (sessionComplete) {
     return (
       <div className="max-w-2xl mx-auto text-center">
         <div className="card">
           <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
-          <h2 className="text-2xl font-bold text-gray-900 mb-4">
-            Interview Complete!
-          </h2>
+          <h2 className="text-2xl font-bold text-gray-900 mb-4">Interview Complete!</h2>
           <p className="text-gray-600 mb-6">
-            Great job completing your {jobRole} interview. Your responses have been evaluated and saved.
+            Great job completing your {jobRole} ({DIFFICULTY_CONFIG[difficulty].label}) interview.
           </p>
           <div className="bg-gray-50 rounded-lg p-4 mb-6">
             <div className="flex items-center justify-center space-x-2 mb-2">
               <BarChart3 className="w-5 h-5 text-primary-600" />
               <span className="font-medium text-gray-900">Overall Score</span>
             </div>
-            <div className="text-3xl font-bold text-primary-600">
-              {calculateOverallScore(feedback)}/10
-            </div>
+            <div className="text-4xl font-bold text-primary-600">{calcScore()}<span className="text-xl text-gray-400">/10</span></div>
           </div>
         </div>
       </div>
     );
   }
 
-  const currentQuestion = questions[currentQuestionIndex];
-  const progress = ((currentQuestionIndex + 1) / questions.length) * 100;
+  // ── Active Interview ────────────────────────────────────────────────────
+  const currentQuestion = questions[currentIndex];
+  const progress = ((currentIndex + 1) / questions.length) * 100;
+  const diffCfg = DIFFICULTY_CONFIG[difficulty];
 
   return (
     <div className="max-w-4xl mx-auto">
-      {/* Progress Bar */}
-      <div className="mb-8">
+      {/* Progress + difficulty badge */}
+      <div className="mb-6">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-sm font-medium text-gray-700">
-            Question {currentQuestionIndex + 1} of {questions.length}
-          </span>
+          <div className="flex items-center space-x-3">
+            <span className="text-sm font-medium text-gray-700">
+              Question {currentIndex + 1} of {questions.length}
+            </span>
+            <span className={`px-2 py-0.5 rounded-full text-xs font-semibold border ${diffCfg.color}`}>
+              {diffCfg.label}
+            </span>
+          </div>
           <span className="text-sm text-gray-500">{Math.round(progress)}% Complete</span>
         </div>
         <div className="w-full bg-gray-200 rounded-full h-2">
-          <div 
+          <div
             className="bg-primary-600 h-2 rounded-full transition-all duration-300"
             style={{ width: `${progress}%` }}
-          ></div>
+          />
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Main Interview Area */}
+        {/* Question + Answer */}
         <div className="lg:col-span-2">
           <div className="card">
             <div className="flex items-start space-x-3 mb-6">
-              <MessageCircle className="w-6 h-6 text-primary-600 mt-1" />
+              <MessageCircle className="w-6 h-6 text-primary-600 mt-1 flex-shrink-0" />
               <div className="flex-1">
-                <h3 className="font-medium text-gray-900 mb-2">Interview Question</h3>
-                <p className="text-lg text-gray-800 leading-relaxed">
-                  {currentQuestion?.question}
-                </p>
+                <div className="flex items-center space-x-2 mb-2">
+                  <h3 className="font-medium text-gray-900">Interview Question</h3>
+                  {currentQuestion?.topic && (
+                    <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded">{currentQuestion.topic}</span>
+                  )}
+                </div>
+                <p className="text-lg text-gray-800 leading-relaxed">{currentQuestion?.question}</p>
               </div>
             </div>
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Your Answer
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Your Answer</label>
                 <textarea
                   value={currentAnswer}
                   onChange={(e) => setCurrentAnswer(e.target.value)}
@@ -222,20 +260,28 @@ const InterviewSession = ({ resumeData, jobRole, onComplete }) => {
                   className="input-field resize-none"
                   disabled={submitting}
                 />
-                <div className="flex justify-between items-center mt-2">
-                  <span className="text-xs text-gray-500">
-                    {currentAnswer.length} characters
-                  </span>
-                  <span className="text-xs text-gray-500">
-                    Aim for 100-300 words for a comprehensive answer
-                  </span>
+                <div className="flex justify-between items-center mt-2 text-xs text-gray-400">
+                  <span>{currentAnswer.length} characters</span>
+                  <span>Aim for 100–300 words</span>
                 </div>
               </div>
 
+              {error && (
+                <div className="flex items-center space-x-2 p-3 bg-red-50 rounded-lg text-red-700 text-sm">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
+
               <div className="flex justify-between items-center">
                 <button
-                  onClick={goToPreviousQuestion}
-                  disabled={currentQuestionIndex === 0 || submitting}
+                  onClick={() => {
+                    if (currentIndex > 0) {
+                      setCurrentIndex(currentIndex - 1);
+                      setCurrentAnswer(answers[questions[currentIndex - 1].id] || '');
+                    }
+                  }}
+                  disabled={currentIndex === 0 || submitting}
                   className="btn-secondary disabled:opacity-50"
                 >
                   Previous
@@ -248,17 +294,13 @@ const InterviewSession = ({ resumeData, jobRole, onComplete }) => {
                 >
                   {submitting ? (
                     <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                      <span>
-                        {evaluating ? 'Getting Feedback...' : 'Submitting...'}
-                      </span>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                      <span>Getting Feedback...</span>
                     </>
                   ) : (
                     <>
                       <Send className="w-4 h-4" />
-                      <span>
-                        {currentQuestionIndex === questions.length - 1 ? 'Complete Interview' : 'Next Question'}
-                      </span>
+                      <span>{currentIndex === questions.length - 1 ? 'Complete Interview' : 'Next Question'}</span>
                     </>
                   )}
                 </button>
@@ -273,56 +315,64 @@ const InterviewSession = ({ resumeData, jobRole, onComplete }) => {
           <div className="card">
             <h4 className="font-medium text-gray-900 mb-3">Session Info</h4>
             <div className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-gray-600">Role:</span>
-                <span className="font-medium">{jobRole}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Questions:</span>
-                <span className="font-medium">{questions.length}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Completed:</span>
-                <span className="font-medium">{Object.keys(answers).length}</span>
-              </div>
+              <div className="flex justify-between"><span className="text-gray-500">Role</span><span className="font-medium">{jobRole}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Difficulty</span><span className={`font-semibold ${diffCfg.color.split(' ')[1]}`}>{diffCfg.label}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Questions</span><span className="font-medium">{questions.length}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Answered</span><span className="font-medium">{Object.keys(answers).length}</span></div>
             </div>
           </div>
 
-          {/* Previous Feedback */}
-          {Object.keys(feedback).length > 0 && (
-            <div className="card">
-              <h4 className="font-medium text-gray-900 mb-3">Recent Feedback</h4>
-              <div className="space-y-3">
-                {Object.entries(feedback).slice(-2).map(([questionId, fb]) => (
-                  <div key={questionId} className="text-sm">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-gray-600">Question {questionId}</span>
-                      <span className="font-medium text-primary-600">{fb.overallScore}/10</span>
-                    </div>
-                    <div className="grid grid-cols-3 gap-1 text-xs">
-                      <div className="text-center">
-                        <div className="text-gray-500">Relevance</div>
-                        <div className="font-medium">{fb.relevance?.score}/10</div>
+          {/* Recent Feedback */}
+          {Object.keys(feedback).length > 0 && (() => {
+            const fbEntries = Object.entries(feedback);
+            const lastTwo   = fbEntries.slice(-2);
+            const lastFb    = fbEntries[fbEntries.length - 1]?.[1];
+            const scoreColor = (s) =>
+              s >= 8 ? 'text-emerald-600' : s >= 5 ? 'text-amber-500' : 'text-red-500';
+            const scoreBg = (s) =>
+              s >= 8 ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+              : s >= 5 ? 'bg-amber-50 text-amber-700 border-amber-200'
+              : 'bg-red-50 text-red-600 border-red-200';
+
+            return (
+              <div className="card">
+                <h4 className="font-semibold text-gray-900 mb-3 text-sm">Recent Feedback</h4>
+                <div className="space-y-3">
+                  {lastTwo.map(([qId, fb], idx) => {
+                    const qNum = fbEntries.findIndex(([id]) => id === qId) + 1;
+                    return (
+                      <div key={qId} className="p-3 rounded-lg bg-gray-50 border border-gray-100">
+                        {/* Row 1: label + score */}
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs font-medium text-gray-500">
+                            Question {qNum}
+                          </span>
+                          <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${scoreBg(fb.overallScore)}`}>
+                            {fb.overallScore ?? '—'}/10
+                          </span>
+                        </div>
+                        {/* Row 2: sub-scores */}
+                        <div className="flex gap-2">
+                          {['relevance', 'clarity', 'depth'].map(k => (
+                            <div key={k} className="flex-1 text-center">
+                              <div className="text-xs text-gray-400 capitalize mb-0.5">{k}</div>
+                              <div className={`text-xs font-semibold ${scoreColor(fb[k]?.score ?? 0)}`}>
+                                {fb[k]?.score ?? '—'}<span className="text-gray-300">/10</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                      <div className="text-center">
-                        <div className="text-gray-500">Clarity</div>
-                        <div className="font-medium">{fb.clarity?.score}/10</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-gray-500">Depth</div>
-                        <div className="font-medium">{fb.depth?.score}/10</div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                    );
+                  })}
+                </div>
+
+                {/* Advanced NLP block for the latest answer */}
+                <AdvancedAnswerFeedback feedback={lastFb} />
               </div>
-              {Object.keys(feedback).length > 0 && (
-                <AdvancedAnswerFeedback 
-                  feedback={feedback[Math.max(...Object.keys(feedback).map(Number))]} 
-                />
-              )}
-            </div>
-          )}
+            );
+          })()}
+
 
           {/* Tips */}
           <div className="card bg-blue-50 border-blue-200">

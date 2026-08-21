@@ -9,74 +9,72 @@ import SessionHistory from './components/SessionHistory';
 import './index.css';
 
 function App() {
-  const [currentStep, setCurrentStep] = useState('upload'); // upload, role, interview, solutions, complete
-  const [resumeData, setResumeData] = useState(null);
+  const [currentStep, setCurrentStep] = useState('upload'); // upload | role | interview | solutions | complete | history
+  const [resumeData, setResumeData] = useState(null);       // { text, filename }
   const [selectedRole, setSelectedRole] = useState('');
-  const [questions, setQuestions] = useState([]);
+  const [sessionData, setSessionData] = useState(null);     // { sessionId, analysis, questions }
   const [completedSessionData, setCompletedSessionData] = useState(null);
   const [sessionHistory, setSessionHistory] = useState([]);
 
-  // Load session history from localStorage on component mount
+  // Load session history from localStorage on mount
   useEffect(() => {
-    const savedHistory = localStorage.getItem('interviewHistory');
-    if (savedHistory) {
-      try {
-        setSessionHistory(JSON.parse(savedHistory));
-      } catch (error) {
-        console.error('Error loading session history:', error);
-      }
+    const saved = localStorage.getItem('interviewHistory');
+    if (saved) {
+      try { setSessionHistory(JSON.parse(saved)); } catch (_) {}
     }
   }, []);
 
-  // Save session history to localStorage whenever it changes
+  // Persist session history
   useEffect(() => {
     if (sessionHistory.length > 0) {
       localStorage.setItem('interviewHistory', JSON.stringify(sessionHistory));
     }
   }, [sessionHistory]);
 
+  // Step 1: Resume uploaded — text extracted only (fast)
   const handleResumeUpload = (data) => {
-    setResumeData(data);
+    setResumeData(data);   // { text, filename }
     setCurrentStep('role');
   };
 
-  const handleRoleSelection = (role) => {
+  // Step 2: Role selected + single Gemini call done — session data ready
+  const handleRoleReady = (role, geminiSession) => {
     setSelectedRole(role);
+    setSessionData(geminiSession); // { sessionId, analysis, questions }
     setCurrentStep('interview');
   };
 
+  // Step 3: Interview complete
   const handleInterviewComplete = (completedSession) => {
     const newSession = {
       id: Date.now(),
       timestamp: new Date().toISOString(),
       jobRole: selectedRole,
       resumeFilename: resumeData?.filename,
+      sessionId: sessionData?.sessionId,
       questions: completedSession.questions,
       answers: completedSession.answers,
       feedback: completedSession.feedback,
       overallScore: completedSession.overallScore
     };
-    
-    // Store completed session data for solutions generation
+
     setCompletedSessionData({
       ...completedSession,
       jobRole: selectedRole,
       resumeText: resumeData?.text
     });
-    
+
     setSessionHistory(prev => [newSession, ...prev]);
     setCurrentStep('solutions');
   };
 
-  const handleSolutionsComplete = () => {
-    setCurrentStep('complete');
-  };
+  const handleSolutionsComplete = () => setCurrentStep('complete');
 
   const resetSession = () => {
     setCurrentStep('upload');
     setResumeData(null);
     setSelectedRole('');
-    setQuestions([]);
+    setSessionData(null);
     setCompletedSessionData(null);
   };
 
@@ -84,37 +82,39 @@ function App() {
     <Router>
       <div className="min-h-screen bg-gray-50">
         <Header />
-        
+
         <main className="container mx-auto px-4 py-8">
           <Routes>
             <Route path="/" element={
               <div className="max-w-4xl mx-auto">
+
                 {currentStep === 'upload' && (
                   <ResumeUpload onUploadSuccess={handleResumeUpload} />
                 )}
-                
+
                 {currentStep === 'role' && (
-                  <JobRoleSelection 
-                    onRoleSelect={handleRoleSelection}
+                  <JobRoleSelection
                     resumeData={resumeData}
+                    onRoleReady={handleRoleReady}
                   />
                 )}
-                
-                {currentStep === 'interview' && (
+
+                {currentStep === 'interview' && sessionData && (
                   <InterviewSession
                     resumeData={resumeData}
                     jobRole={selectedRole}
+                    sessionData={sessionData}
                     onComplete={handleInterviewComplete}
                   />
                 )}
-                
+
                 {currentStep === 'solutions' && completedSessionData && (
                   <InterviewSolutions
                     sessionData={completedSessionData}
                     onBack={handleSolutionsComplete}
                   />
                 )}
-                
+
                 {currentStep === 'complete' && (
                   <div className="text-center">
                     <div className="card max-w-md mx-auto">
@@ -125,10 +125,7 @@ function App() {
                         Great job! Your interview session has been completed and saved.
                       </p>
                       <div className="space-y-3">
-                        <button
-                          onClick={resetSession}
-                          className="btn-primary w-full"
-                        >
+                        <button onClick={resetSession} className="btn-primary w-full">
                           Start New Interview
                         </button>
                         <button
@@ -141,23 +138,24 @@ function App() {
                     </div>
                   </div>
                 )}
-                
+
                 {currentStep === 'history' && (
-                  <SessionHistory 
+                  <SessionHistory
                     sessions={sessionHistory}
                     onBack={() => setCurrentStep('complete')}
                   />
                 )}
+
               </div>
             } />
-            
+
             <Route path="/history" element={
-              <SessionHistory 
+              <SessionHistory
                 sessions={sessionHistory}
                 onBack={() => window.history.back()}
               />
             } />
-            
+
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>

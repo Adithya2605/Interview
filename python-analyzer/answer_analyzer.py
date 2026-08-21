@@ -7,6 +7,8 @@ Provides sentiment analysis, keyword coverage, clarity scoring, and ML-based sui
 import sys
 import json
 import re
+import os
+import pickle
 import spacy
 import pandas as pd
 from textblob import TextBlob
@@ -16,6 +18,11 @@ from sklearn.model_selection import train_test_split
 import numpy as np
 import warnings
 warnings.filterwarnings('ignore')
+
+# Paths for cached model files
+_DIR = os.path.dirname(os.path.abspath(__file__))
+_MODEL_PATH = os.path.join(_DIR, 'answer_model.pkl')
+_VECTORIZER_PATH = os.path.join(_DIR, 'answer_vectorizer.pkl')
 
 # Load NLP model
 try:
@@ -201,47 +208,59 @@ def analyze_with_spacy(text):
         }
 
 # --- ML Suitability Model ---
-def create_suitability_model():
-    """Create and train a simple suitability prediction model"""
+def _train_and_save_model():
+    """Train the suitability model and cache it to disk."""
+    training_data = {
+        "answer": [
+            "I have strong teamwork skills and experience in python projects with databases",
+            "I don't like working with others and prefer to work alone always",
+            "I enjoy problem solving and data analysis in real-world cases using machine learning",
+            "I have no experience with programming but I'm willing to learn",
+            "I led a team of 5 developers to successfully deliver a complex web application",
+            "I struggle with communication and often miss deadlines",
+            "I'm passionate about technology and continuously learn new frameworks",
+            "I have 5 years of experience in software development with Python and React",
+            "I don't understand the question and have nothing to say",
+            "I implemented CI/CD pipelines and improved deployment efficiency by 40%",
+            "I have excellent problem-solving skills and can debug complex issues",
+            "I'm not interested in this role and just applying randomly",
+            "I mentored junior developers and contributed to open source projects",
+            "I have difficulty learning new technologies and adapting to change"
+        ],
+        "label": [1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0]
+    }
+    df = pd.DataFrame(training_data)
+    vectorizer = TfidfVectorizer(max_features=100, stop_words='english')
+    X = vectorizer.fit_transform(df["answer"])
+    y = df["label"]
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+    model = LogisticRegression(random_state=42)
+    model.fit(X_train, y_train)
+    accuracy = model.score(X_test, y_test)
+    # Cache to disk
+    with open(_MODEL_PATH, 'wb') as f:
+        pickle.dump(model, f)
+    with open(_VECTORIZER_PATH, 'wb') as f:
+        pickle.dump(vectorizer, f)
+    return model, vectorizer, accuracy
+
+
+def load_suitability_model():
+    """Load model from disk cache, training it first if not present."""
     try:
-        # Enhanced training data with more examples
-        training_data = {
-            "answer": [
-                "I have strong teamwork skills and experience in python projects with databases",
-                "I don't like working with others and prefer to work alone always",
-                "I enjoy problem solving and data analysis in real-world cases using machine learning",
-                "I have no experience with programming but I'm willing to learn",
-                "I led a team of 5 developers to successfully deliver a complex web application",
-                "I struggle with communication and often miss deadlines",
-                "I'm passionate about technology and continuously learn new frameworks",
-                "I have 5 years of experience in software development with Python and React",
-                "I don't understand the question and have nothing to say",
-                "I implemented CI/CD pipelines and improved deployment efficiency by 40%",
-                "I have excellent problem-solving skills and can debug complex issues",
-                "I'm not interested in this role and just applying randomly",
-                "I mentored junior developers and contributed to open source projects",
-                "I have difficulty learning new technologies and adapting to change"
-            ],
-            "label": [1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0]  # 1 = suitable, 0 = not suitable
-        }
-        
-        df = pd.DataFrame(training_data)
-        vectorizer = TfidfVectorizer(max_features=100, stop_words='english')
-        X = vectorizer.fit_transform(df["answer"])
-        y = df["label"]
-        
-        # Split data for validation
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
-        
-        model = LogisticRegression(random_state=42)
-        model.fit(X_train, y_train)
-        
-        # Calculate accuracy
-        accuracy = model.score(X_test, y_test)
-        
-        return model, vectorizer, accuracy
+        if os.path.exists(_MODEL_PATH) and os.path.exists(_VECTORIZER_PATH):
+            with open(_MODEL_PATH, 'rb') as f:
+                model = pickle.load(f)
+            with open(_VECTORIZER_PATH, 'rb') as f:
+                vectorizer = pickle.load(f)
+            return model, vectorizer, 1.0  # accuracy unknown from cache
+        return _train_and_save_model()
     except Exception as e:
         return None, None, 0.0
+
+
+# Load model once at module import time (fast for subsequent calls)
+_MODEL, _VECTORIZER, _MODEL_ACCURACY = load_suitability_model()
 
 def predict_suitability(text, model, vectorizer):
     """Predict answer suitability using trained model"""
@@ -277,8 +296,8 @@ def predict_suitability(text, model, vectorizer):
 def analyze_answer(answer_text, question, job_role="Software Developer"):
     """Comprehensive answer analysis"""
     try:
-        # Create and train model
-        model, vectorizer, model_accuracy = create_suitability_model()
+        # Use pre-loaded model (no re-training per call)
+        model, vectorizer, model_accuracy = _MODEL, _VECTORIZER, _MODEL_ACCURACY
         
         # Perform all analyses
         sentiment_analysis = analyze_sentiment(answer_text)
